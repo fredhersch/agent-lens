@@ -41,6 +41,7 @@ flowchart LR
 - **⚡ Zero Redirection**: Issues are posted directly using GitHub's REST API without leaving the app.
 - **🛡️ Secure RBAC Authentication**: Validates GitHub Personal Access Tokens (PATs) and checks repo permissions (`Admin`, `Maintainer`, `Write`). Tokens stay safely in client `localStorage`.
 - **📌 Persistent Pin Badges**: Filed issues stick to their DOM elements as `#issue` badges even after page reloads.
+- **🔄 Auto-Sync & Pin Pruning**: Automatically queries GitHub Issues on page load to prune pins when an issue is closed or resolved by AI agents. Includes in-modal "Sync GitHub" and "Clear Pins" cache management.
 - **🤖 Agent-First Directives**: Generates markdown containing file path, CSS selector, clean outer HTML, and element text.
 - **📦 Zero External Dependencies**: No Tailwind, Bootstrap, or FontAwesome required. Fully self-contained with inline SVG icons.
 - **⌨️ Keyboard Shortcuts**: Press <kbd>C</kbd> to inspect and pin; press <kbd>Esc</kbd> to dismiss; press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> to connect GitHub.
