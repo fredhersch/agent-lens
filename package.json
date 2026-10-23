@@ -1,0 +1,32 @@
+{
+  "name": "agent-lens",
+  "version": "1.0.0",
+  "description": "Visual DOM feedback and issue tracker built for AI coding agents",
+  "main": "dist/agent-lens.js",
+  "bin": {
+    "agentlens": "cli/agentlens_cli.js"
+  },
+  "scripts": {
+    "build": "node -e \"const fs=require('fs'); fs.copyFileSync('src/agent-lens.js', 'dist/agent-lens.js');\"",
+    "demo": "npx serve demo",
+    "test:cli": "python3 cli/fetch_issues.py --help"
+  },
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "cursor",
+    "claude-code",
+    "antigravity",
+    "copilot",
+    "ui-feedback",
+    "github-issues",
+    "dom-inspector",
+    "zero-ambiguity"
+  ],
+  "author": "Fred Hersch",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fredhersch/agent-lens.git"
+  }
+}

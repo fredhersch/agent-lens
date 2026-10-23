@@ -1,0 +1,1178 @@
+/**
+ * AgentLens - Visual DOM Feedback & Directives Widget for AI Coding Agents
+ * 
+ * Features:
+ *  - Floating dock with authentication, role badges, and quick toggles
+ *  - Visual DOM element inspector & click-to-pin targeting
+ *  - Anchored speech-bubble popovers with contextual element grounding
+ *  - Zero-ambiguity Markdown directive generation for AI agents (Claude, Cursor, Copilot, Antigravity)
+ *  - Direct in-page GitHub Issues creation via GitHub REST API (no redirects)
+ *  - Role-based access control (Admin, Maintainer, Contributor verification)
+ *  - Persistent inline pin badges (#issue) linked to DOM elements
+ *  - Zero external CSS or icon dependencies (self-contained SVGs)
+ * 
+ * Configuration:
+ *  - Via HTML tag: <script src="agent-lens.js" data-repo="owner/repo" data-position="bottom-right"></script>
+ *  - Via Global:   window.AgentLensConfig = { repo: 'owner/repo', defaultLabels: [...] }
+ *  - Via API:      AgentLens.init({ repo: 'owner/repo' })
+ * 
+ * License: MIT
+ */
+
+(function (root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    define([], factory);
+  } else if (typeof module === 'object' && module.exports) {
+    module.exports = factory();
+  } else {
+    root.AgentLens = factory();
+  }
+}(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  // SVG Icons (Zero-dependency fallback)
+  const ICONS = {
+    pin: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
+    key: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-1-1l-4 4m2 2l-2 2m-2-2l-2 2m-1-1l-6 6a5 5 0 0 1-7-7l6-6m12-2l2 2"></path></svg>`,
+    shield: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`,
+    clipboard: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`,
+    send: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`,
+    check: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
+    trash: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
+    close: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+    spinner: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="al-spin"><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line></svg>`
+  };
+
+  const DEFAULT_CONFIG = {
+    repo: '', // 'owner/repo'
+    repoOwner: '',
+    repoName: '',
+    defaultLabels: ['agent-task', 'ui-feedback'],
+    position: 'bottom-right', // 'bottom-right', 'bottom-left', 'top-right', 'top-left'
+    theme: 'dark', // 'dark', 'light'
+    storageAuthKey: 'agentlens_auth_v1',
+    storagePinsKey: 'agentlens_pins_v1',
+    storageConfigKey: 'agentlens_custom_repo_v1',
+    hotkeyComment: 'c',
+    hotkeyConnect: 'f' // Cmd/Ctrl + Shift + F
+  };
+
+  let CONFIG = { ...DEFAULT_CONFIG };
+  let isInitialized = false;
+  let authUser = null;
+  let isInspectMode = false;
+  let hoveredElement = null;
+  let activePin = null;
+
+  function parseScriptTagConfig() {
+    const currentScript = document.currentScript || document.querySelector('script[data-repo]');
+    if (!currentScript) return {};
+
+    const cfg = {};
+    if (currentScript.dataset.repo) {
+      cfg.repo = currentScript.dataset.repo.trim();
+      const parts = cfg.repo.split('/');
+      if (parts.length === 2) {
+        cfg.repoOwner = parts[0];
+        cfg.repoName = parts[1];
+      }
+    }
+    if (currentScript.dataset.labels) {
+      cfg.defaultLabels = currentScript.dataset.labels.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (currentScript.dataset.position) {
+      cfg.position = currentScript.dataset.position.trim();
+    }
+    if (currentScript.dataset.theme) {
+      cfg.theme = currentScript.dataset.theme.trim();
+    }
+    return cfg;
+  }
+
+  function getEffectiveRepo() {
+    if (CONFIG.repoOwner && CONFIG.repoName) {
+      return `${CONFIG.repoOwner}/${CONFIG.repoName}`;
+    }
+    if (CONFIG.repo) {
+      const parts = CONFIG.repo.split('/');
+      if (parts.length === 2) {
+        CONFIG.repoOwner = parts[0];
+        CONFIG.repoName = parts[1];
+        return CONFIG.repo;
+      }
+    }
+    const saved = localStorage.getItem(CONFIG.storageConfigKey);
+    if (saved) {
+      const parts = saved.split('/');
+      if (parts.length === 2) {
+        CONFIG.repoOwner = parts[0];
+        CONFIG.repoName = parts[1];
+        CONFIG.repo = saved;
+        return saved;
+      }
+    }
+    return '';
+  }
+
+  function setCustomRepo(repoStr) {
+    const parts = (repoStr || '').trim().split('/');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      CONFIG.repoOwner = parts[0];
+      CONFIG.repoName = parts[1];
+      CONFIG.repo = repoStr.trim();
+      localStorage.setItem(CONFIG.storageConfigKey, CONFIG.repo);
+      return true;
+    }
+    return false;
+  }
+
+  function getPageLocation() {
+    let path = window.location.pathname || 'index.html';
+    if (path === '/' || path.endsWith('/')) path += 'index.html';
+    return path.replace(/^\//, '');
+  }
+
+  function generateCssSelector(el) {
+    if (!el || el === document.body || el === document.documentElement) return 'body';
+    if (el.id) return `#${CSS.escape(el.id)}`;
+
+    const path = [];
+    let curr = el;
+    while (curr && curr.nodeType === Node.ELEMENT_NODE && curr !== document.body && curr !== document.documentElement) {
+      let selector = curr.nodeName.toLowerCase();
+      if (curr.id) {
+        selector += `#${CSS.escape(curr.id)}`;
+        path.unshift(selector);
+        break;
+      } else if (curr.className && typeof curr.className === 'string') {
+        const classes = curr.className
+          .trim()
+          .split(/\s+/)
+          .filter(c => c && !c.startsWith('al-') && !c.includes(':') && !c.includes('/'));
+        if (classes.length > 0) {
+          selector += '.' + classes.slice(0, 2).map(CSS.escape).join('.');
+        }
+      }
+      path.unshift(selector);
+      curr = curr.parentNode;
+      if (path.length >= 4) break;
+    }
+    return path.join(' > ');
+  }
+
+  function getCleanOuterHtml(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('.al-pin, #al-root').forEach(n => n.remove());
+    let html = clone.outerHTML;
+    if (html.length > 450) {
+      const tagName = el.tagName.toLowerCase();
+      const openTag = el.outerHTML.match(/^<[^>]+>/)?.[0] || `<${tagName}>`;
+      const textPreview = (el.innerText || '').trim().substring(0, 80);
+      html = `${openTag}\n  ${textPreview}\n</${tagName}>`;
+    }
+    return html;
+  }
+
+  function injectStyles() {
+    if (document.getElementById('al-styles')) return;
+
+    const styleEl = document.createElement('style');
+    styleEl.id = 'al-styles';
+    styleEl.textContent = `
+      @keyframes al-spin { 100% { transform: rotate(360deg); } }
+      .al-spin { animation: al-spin 1s linear infinite; }
+
+      @keyframes al-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7); }
+        70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+      }
+
+      /* Floating Dock */
+      #al-dock {
+        position: fixed !important;
+        z-index: 9999999 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        padding: 6px 14px !important;
+        border-radius: 9999px !important;
+        background: #090d16 !important;
+        color: #f8fafc !important;
+        border: 1px solid #334155 !important;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        font-size: 12px !important;
+        user-select: none !important;
+        transition: transform 0.2s ease, border-color 0.2s ease !important;
+      }
+      #al-dock.pos-bottom-right { bottom: 24px !important; right: 24px !important; }
+      #al-dock.pos-bottom-left { bottom: 24px !important; left: 24px !important; }
+      #al-dock.pos-top-right { top: 24px !important; right: 24px !important; }
+      #al-dock.pos-top-left { top: 24px !important; left: 24px !important; }
+
+      #al-dock:hover {
+        transform: translateY(-2px);
+        border-color: #3b82f6 !important;
+      }
+
+      .al-dock-btn {
+        background: #172033 !important;
+        border: 1px solid #334155 !important;
+        color: #f8fafc !important;
+        padding: 5px 12px !important;
+        border-radius: 8px !important;
+        font-size: 11px !important;
+        font-weight: 600 !important;
+        cursor: pointer !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        transition: all 0.15s ease !important;
+        line-height: 1.2 !important;
+        text-decoration: none !important;
+      }
+      .al-dock-btn:hover {
+        background: #1e2942 !important;
+        border-color: #3b82f6 !important;
+      }
+      .al-dock-btn-primary {
+        background: #2563eb !important;
+        border-color: #1d4ed8 !important;
+        color: #ffffff !important;
+      }
+      .al-dock-btn-primary:hover {
+        background: #1d4ed8 !important;
+      }
+      .al-dock-btn:disabled {
+        opacity: 0.6 !important;
+        cursor: not-allowed !important;
+      }
+
+      .al-pulse-dot {
+        width: 8px !important;
+        height: 8px !important;
+        border-radius: 50% !important;
+        background: #34d399 !important;
+        box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.7) !important;
+        animation: al-pulse 2s infinite !important;
+      }
+
+      /* Inspector Target Mode Box */
+      #al-inspect-box {
+        position: fixed !important;
+        pointer-events: none !important;
+        z-index: 9999980 !important;
+        border: 2px solid #3b82f6 !important;
+        background: rgba(59, 130, 246, 0.15) !important;
+        border-radius: 4px !important;
+        display: none;
+        transition: top 0.03s ease, left 0.03s ease, width 0.03s ease, height 0.03s ease !important;
+      }
+      #al-inspect-tooltip {
+        position: absolute !important;
+        top: -24px !important;
+        left: 0 !important;
+        background: #090d16 !important;
+        color: #93c5fd !important;
+        padding: 2px 7px !important;
+        font-size: 11px !important;
+        font-family: ui-monospace, SFMono-Regular, monospace !important;
+        border-radius: 4px !important;
+        border: 1px solid #334155 !important;
+        white-space: nowrap !important;
+        pointer-events: none !important;
+      }
+
+      /* Target Mode Banner */
+      #al-target-banner {
+        position: fixed !important;
+        top: 20px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        z-index: 9999995 !important;
+        background: #090d16 !important;
+        color: #ffffff !important;
+        padding: 9px 20px !important;
+        border-radius: 9999px !important;
+        border: 1px solid #3b82f6 !important;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.6) !important;
+        display: none;
+        align-items: center !important;
+        gap: 12px !important;
+        font-size: 13px !important;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+      }
+
+      /* Pins */
+      .al-pin {
+        position: absolute !important;
+        z-index: 9999900 !important;
+        transform: translate(-50%, -50%) !important;
+        min-width: 26px !important;
+        height: 26px !important;
+        padding: 0 6px !important;
+        border-radius: 9999px !important;
+        background: #2563eb !important;
+        color: #ffffff !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        font-size: 11px !important;
+        font-weight: 700 !important;
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.3), 0 4px 10px rgba(0,0,0,0.4) !important;
+        cursor: pointer !important;
+        transition: transform 0.15s ease, background-color 0.15s ease !important;
+        user-select: none !important;
+      }
+      .al-pin:hover {
+        transform: translate(-50%, -50%) scale(1.15) !important;
+        background: #1d4ed8 !important;
+      }
+      .al-pin.has-issue {
+        background: #059669 !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3), 0 4px 10px rgba(0,0,0,0.4) !important;
+      }
+
+      /* Popover Card */
+      #al-inline-popover {
+        position: absolute !important;
+        z-index: 9999992 !important;
+        width: 380px !important;
+        max-width: calc(100vw - 32px) !important;
+        background: #0f172a !important;
+        color: #f8fafc !important;
+        border-radius: 14px !important;
+        border: 1px solid #334155 !important;
+        box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+        padding: 14px !important;
+        display: none;
+        flex-direction: column !important;
+        gap: 10px !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+        font-size: 12px !important;
+      }
+      #al-inline-popover::before {
+        content: '';
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: #0f172a;
+        border-left: 1px solid #334155;
+        border-top: 1px solid #334155;
+        transform: rotate(45deg);
+        top: -6px;
+        left: 20px;
+      }
+      #al-inline-popover.arrow-bottom::before {
+        top: auto;
+        bottom: -6px;
+        border-left: none;
+        border-top: none;
+        border-right: 1px solid #334155;
+        border-bottom: 1px solid #334155;
+      }
+
+      .al-textarea, .al-input {
+        width: 100% !important;
+        border-radius: 8px !important;
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+        background: #090d16 !important;
+        border: 1px solid #334155 !important;
+        color: #f8fafc !important;
+        box-sizing: border-box !important;
+        outline: none !important;
+        font-family: inherit !important;
+      }
+      .al-textarea:focus, .al-input:focus {
+        border-color: #3b82f6 !important;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25) !important;
+      }
+
+      /* Modal Overlay */
+      #al-auth-modal {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background: rgba(0, 0, 0, 0.75) !important;
+        backdrop-filter: blur(4px) !important;
+        z-index: 99999999 !important;
+        display: none;
+        align-items: center !important;
+        justify-content: center !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      }
+      #al-auth-card {
+        width: 460px !important;
+        max-width: calc(100vw - 32px) !important;
+        background: #0f172a !important;
+        border: 1px solid #334155 !important;
+        border-radius: 16px !important;
+        padding: 24px !important;
+        color: #f8fafc !important;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7) !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 14px !important;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
+
+  function injectDOM() {
+    if (document.getElementById('al-root')) return;
+
+    const root = document.createElement('div');
+    root.id = 'al-root';
+    root.innerHTML = `
+      <div id="al-inspect-box">
+        <div id="al-inspect-tooltip">&lt;tag&gt;</div>
+      </div>
+
+      <div id="al-target-banner">
+        <span class="al-pulse-dot"></span>
+        <span><strong>Targeting Mode:</strong> Click any element to pin a directive (Esc to cancel)</span>
+        <button id="al-cancel-target-btn" class="al-dock-btn" style="padding:3px 8px; font-size:11px;">Cancel</button>
+      </div>
+
+      <!-- Anchored Popover -->
+      <div id="al-inline-popover">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span id="al-pop-tag" style="font-family:monospace; font-size:11px; color:#60a5fa; background:rgba(37,99,235,0.15); padding:2px 6px; border-radius:4px;">&lt;element&gt;</span>
+            <span id="al-pop-page" style="font-size:10px; color:#94a3b8; font-family:monospace;">${getPageLocation()}</span>
+          </div>
+          <button id="al-pop-close-btn" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:14px; padding:2px;">${ICONS.close}</button>
+        </div>
+
+        <div id="al-pop-view-main" style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; gap:4px; flex-wrap:wrap;" id="al-pop-cats">
+            <button class="al-dock-btn al-cat-btn al-dock-btn-primary" data-cat="UI Fix" style="font-size:10px; padding:2px 7px;">🎨 UI Fix</button>
+            <button class="al-dock-btn al-cat-btn" data-cat="Bug" style="font-size:10px; padding:2px 7px;">🐛 Bug</button>
+            <button class="al-dock-btn al-cat-btn" data-cat="Copy" style="font-size:10px; padding:2px 7px;">✍️ Copy</button>
+            <button class="al-dock-btn al-cat-btn" data-cat="Feature" style="font-size:10px; padding:2px 7px;">💡 Feature</button>
+          </div>
+
+          <textarea id="al-pop-textarea" class="al-textarea" rows="3" placeholder="Describe the change or bug for your AI coding agent..."></textarea>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; pt-1;">
+            <button id="al-pop-copy-btn" class="al-dock-btn" title="Copy markdown directive to clipboard for your AI coding agent">
+              ${ICONS.clipboard}
+              <span>Copy for Agent</span>
+            </button>
+            <button id="al-pop-submit-btn" class="al-dock-btn al-dock-btn-primary" title="Post issue directly to GitHub without leaving page">
+              ${ICONS.send}
+              <span id="al-pop-submit-label">Create Issue</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Success View -->
+        <div id="al-pop-view-success" style="display:none; flex-direction:column; gap:8px; padding:4px 0;">
+          <div style="display:flex; align-items:center; gap:8px; color:#34d399;">
+            <div style="width:24px; height:24px; border-radius:50%; background:rgba(16,185,129,0.2); display:flex; align-items:center; justify-content:center;">
+              ${ICONS.check}
+            </div>
+            <div>
+              <strong style="font-size:13px; color:#f8fafc;" id="al-success-title">Issue Created!</strong>
+              <div style="font-size:10px; color:#94a3b8;">Anchored inline on this element</div>
+            </div>
+          </div>
+          <div id="al-success-body" style="font-size:11px; color:#cbd5e1; background:#090d16; padding:8px 10px; border-radius:6px; border:1px solid #334155; max-height:80px; overflow-y:auto;"></div>
+          <div style="display:flex; justify-content:flex-end; gap:6px; pt-1;">
+            <button id="al-success-done-btn" class="al-dock-btn al-dock-btn-primary" style="padding:4px 12px;">Done</button>
+          </div>
+        </div>
+
+        <!-- Existing Pin View -->
+        <div id="al-pop-view-existing" style="display:none; flex-direction:column; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span id="al-existing-badge" style="font-size:11px; font-weight:700; color:#34d399; background:rgba(16,185,129,0.15); padding:2px 8px; border-radius:4px;">#Issue</span>
+            <span id="al-existing-cat" style="font-size:10px; color:#94a3b8;">UI Fix</span>
+          </div>
+          <div id="al-existing-comment" style="font-size:12px; color:#f8fafc; background:#090d16; padding:8px 10px; border-radius:6px; border:1px solid #334155; line-height:1.4;"></div>
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <button id="al-delete-pin-btn" class="al-dock-btn" style="color:#f87171; border-color:rgba(239,68,68,0.3); font-size:11px;">
+              ${ICONS.trash}
+              <span>Remove Pin</span>
+            </button>
+            <button id="al-existing-copy-btn" class="al-dock-btn">
+              ${ICONS.clipboard}
+              <span>Copy Task</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Floating Dock -->
+      <div id="al-dock" class="pos-${CONFIG.position}">
+        <div class="al-pulse-dot"></div>
+        <img id="al-dock-avatar" src="" alt="user" style="width:20px; height:20px; border-radius:50%; border:1px solid #3b82f6; display:none;" />
+        <span id="al-dock-user" style="font-weight:600; font-size:11px; display:none;">@user</span>
+        <span id="al-dock-role" style="font-size:9px; text-transform:uppercase; padding:2px 5px; border-radius:4px; background:rgba(37,99,235,0.2); color:#60a5fa; display:none;">Admin</span>
+        <button id="al-dock-pin-btn" class="al-dock-btn al-dock-btn-primary" title="Click to pin a comment inline to any UI element (Hotkey: C)">
+          ${ICONS.pin}
+          <span>Inline Comment</span>
+        </button>
+        <button id="al-dock-auth-btn" class="al-dock-btn" title="Configure GitHub Connection" style="padding:5px 9px;">
+          ${ICONS.key}
+          <span id="al-dock-auth-label">Connect</span>
+        </button>
+      </div>
+
+      <!-- Dedicated Authentication Modal -->
+      <div id="al-auth-modal">
+        <div id="al-auth-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="width:28px; height:28px; border-radius:8px; background:rgba(59,130,246,0.15); display:flex; align-items:center; justify-content:center; color:#60a5fa;">
+                ${ICONS.shield}
+              </div>
+              <div>
+                <strong style="font-size:14px;">AgentLens • Connect GitHub</strong>
+                <div style="font-size:11px; color:#94a3b8;">Direct in-page issue creation for collaborators & AI agents</div>
+              </div>
+            </div>
+            <button id="al-auth-close-btn" style="background:none; border:none; color:#94a3b8; font-size:16px; cursor:pointer;">${ICONS.close}</button>
+          </div>
+
+          <div style="font-size:12px; color:#cbd5e1; line-height:1.5;">
+            Authenticate with a GitHub Personal Access Token (PAT) to file issues directly on your repository without leaving the page.
+          </div>
+
+          <div>
+            <label style="font-size:11px; font-weight:600; text-transform:uppercase; color:#94a3b8; display:block; margin-bottom:4px;">Target Repository (owner/repo)</label>
+            <input id="al-auth-repo-input" type="text" placeholder="e.g. acme/web-app" class="al-input" style="height:36px;" value="${getEffectiveRepo()}" />
+          </div>
+
+          <div>
+            <label style="font-size:11px; font-weight:600; text-transform:uppercase; color:#94a3b8; display:block; margin-bottom:4px;">Personal Access Token (PAT)</label>
+            <input id="al-auth-token-input" type="password" placeholder="ghp_... or github_pat_..." class="al-input" style="height:36px;" />
+            <div style="margin-top:4px; font-size:10px; color:#64748b; display:flex; justify-content:space-between;">
+              <span>Requires <code>repo</code> or <code>issues:write</code> scope.</span>
+              <a href="https://github.com/settings/tokens/new?scopes=repo&description=AgentLens+Feedback+Widget" target="_blank" rel="noopener noreferrer" style="color:#60a5fa; text-decoration:underline;">Generate Token ↗</a>
+            </div>
+          </div>
+
+          <div id="al-auth-error" style="color:#f87171; font-size:11px; display:none; padding:6px 10px; border-radius:6px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2);"></div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; pt-2;">
+            <button id="al-auth-clear-btn" class="al-dock-btn" style="color:#f87171; border-color:rgba(239,68,68,0.3); display:none;">Disconnect</button>
+            <div style="display:flex; gap:8px; margin-left:auto;">
+              <button id="al-auth-cancel-btn" class="al-dock-btn">Cancel</button>
+              <button id="al-auth-save-btn" class="al-dock-btn al-dock-btn-primary">
+                <span>Verify &amp; Connect</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(root);
+  }
+
+  function setupEvents() {
+    const dockAvatar = document.getElementById('al-dock-avatar');
+    const dockUser = document.getElementById('al-dock-user');
+    const dockRole = document.getElementById('al-dock-role');
+    const dockPinBtn = document.getElementById('al-dock-pin-btn');
+    const dockAuthBtn = document.getElementById('al-dock-auth-btn');
+    const dockAuthLabel = document.getElementById('al-dock-auth-label');
+    const inspectBox = document.getElementById('al-inspect-box');
+    const inspectTooltip = document.getElementById('al-inspect-tooltip');
+    const targetBanner = document.getElementById('al-target-banner');
+    const cancelTargetBtn = document.getElementById('al-cancel-target-btn');
+    const inlinePopover = document.getElementById('al-inline-popover');
+    const popTag = document.getElementById('al-pop-tag');
+    const popPage = document.getElementById('al-pop-page');
+    const popCloseBtn = document.getElementById('al-pop-close-btn');
+    const popViewMain = document.getElementById('al-pop-view-main');
+    const popViewSuccess = document.getElementById('al-pop-view-success');
+    const popViewExisting = document.getElementById('al-pop-view-existing');
+    const popTextarea = document.getElementById('al-pop-textarea');
+    const popSubmitBtn = document.getElementById('al-pop-submit-btn');
+    const popSubmitLabel = document.getElementById('al-pop-submit-label');
+    const popCopyBtn = document.getElementById('al-pop-copy-btn');
+    const successTitle = document.getElementById('al-success-title');
+    const successBody = document.getElementById('al-success-body');
+    const successDoneBtn = document.getElementById('al-success-done-btn');
+    const existingBadge = document.getElementById('al-existing-badge');
+    const existingCat = document.getElementById('al-existing-cat');
+    const existingComment = document.getElementById('al-existing-comment');
+    const existingCopyBtn = document.getElementById('al-existing-copy-btn');
+    const deletePinBtn = document.getElementById('al-delete-pin-btn');
+    const authModal = document.getElementById('al-auth-modal');
+    const authCloseBtn = document.getElementById('al-auth-close-btn');
+    const authCancelBtn = document.getElementById('al-auth-cancel-btn');
+    const authSaveBtn = document.getElementById('al-auth-save-btn');
+    const authClearBtn = document.getElementById('al-auth-clear-btn');
+    const authRepoInput = document.getElementById('al-auth-repo-input');
+    const authTokenInput = document.getElementById('al-auth-token-input');
+    const authError = document.getElementById('al-auth-error');
+
+    let activeCategory = 'UI Fix';
+
+    // Category buttons
+    document.querySelectorAll('#al-pop-cats .al-cat-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#al-pop-cats .al-cat-btn').forEach(b => b.classList.remove('al-dock-btn-primary'));
+        btn.classList.add('al-dock-btn-primary');
+        activeCategory = btn.dataset.cat;
+      });
+    });
+
+    // Token & Repo Verification
+    async function verifyCredentials(token, repoStr) {
+      if (!repoStr || !repoStr.includes('/')) {
+        throw new Error('Please enter a valid repository in owner/repo format (e.g. acme/dashboard).');
+      }
+      const [owner, name] = repoStr.split('/');
+
+      // Verify User
+      const userRes = await fetch('https://api.github.com/user', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (!userRes.ok) throw new Error('Invalid token: unable to fetch authenticated GitHub user.');
+      const userData = await userRes.json();
+
+      // Verify Repository Access & Permissions
+      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${name}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (!repoRes.ok) throw new Error(`Token lacks access to ${owner}/${name}. Check repository name and permissions.`);
+      const repoData = await repoRes.json();
+
+      const perms = repoData.permissions || {};
+      const hasWrite = perms.admin || perms.maintain || perms.push;
+      if (!hasWrite) {
+        throw new Error(`@${userData.login} only has read access to ${owner}/${name}. Write/push permissions are required.`);
+      }
+
+      let roleName = 'Write';
+      if (perms.admin) roleName = 'Admin';
+      else if (perms.maintain) roleName = 'Maintainer';
+
+      return {
+        token: token,
+        repo: repoStr,
+        repoOwner: owner,
+        repoName: name,
+        login: userData.login,
+        role: roleName,
+        avatar_url: userData.avatar_url || '',
+        checkedAt: Date.now()
+      };
+    }
+
+    function updateAuthUI(user) {
+      if (user) {
+        authUser = user;
+        dockAvatar.src = user.avatar_url || 'https://github.com/ghost.png';
+        dockAvatar.style.display = 'block';
+        dockUser.textContent = `@${user.login}`;
+        dockUser.style.display = 'inline';
+        dockRole.textContent = user.role;
+        dockRole.style.display = 'inline';
+        dockAuthLabel.textContent = 'Connected';
+        authClearBtn.style.display = 'inline-block';
+        authTokenInput.value = user.token;
+        authRepoInput.value = user.repo || getEffectiveRepo();
+      } else {
+        authUser = null;
+        dockAvatar.style.display = 'none';
+        dockUser.style.display = 'none';
+        dockRole.style.display = 'none';
+        dockAuthLabel.textContent = 'Connect';
+        authClearBtn.style.display = 'none';
+        authTokenInput.value = '';
+      }
+    }
+
+    // Load auth from localStorage
+    const stored = localStorage.getItem(CONFIG.storageAuthKey);
+    if (stored) {
+      try {
+        const cached = JSON.parse(stored);
+        if (cached && cached.token) {
+          if (cached.repo) setCustomRepo(cached.repo);
+          updateAuthUI(cached);
+        }
+      } catch (e) {
+        localStorage.removeItem(CONFIG.storageAuthKey);
+      }
+    }
+
+    // URL trigger (e.g. ?feedback=true or #feedback or #agentlens)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('feedback') || urlParams.has('agentlens') || ['#feedback', '#agentlens', '#login'].includes(window.location.hash)) {
+      openAuthModal();
+    }
+
+    function openAuthModal() {
+      authError.style.display = 'none';
+      authRepoInput.value = getEffectiveRepo();
+      authModal.style.display = 'flex';
+      if (!authRepoInput.value) {
+        authRepoInput.focus();
+      } else {
+        authTokenInput.focus();
+      }
+    }
+
+    dockAuthBtn.addEventListener('click', openAuthModal);
+    authCloseBtn.addEventListener('click', () => { authModal.style.display = 'none'; });
+    authCancelBtn.addEventListener('click', () => { authModal.style.display = 'none'; });
+
+    // Disconnect Token
+    authClearBtn.addEventListener('click', () => {
+      if (confirm('Disconnect GitHub token?')) {
+        localStorage.removeItem(CONFIG.storageAuthKey);
+        updateAuthUI(null);
+        authModal.style.display = 'none';
+      }
+    });
+
+    // Save & Verify
+    authSaveBtn.addEventListener('click', async () => {
+      const repoStr = authRepoInput.value.trim();
+      const token = authTokenInput.value.trim();
+
+      if (!repoStr) {
+        authError.textContent = 'Please enter a target repository in owner/repo format.';
+        authError.style.display = 'block';
+        return;
+      }
+
+      if (!token) {
+        authError.textContent = 'Please enter a GitHub Personal Access Token.';
+        authError.style.display = 'block';
+        return;
+      }
+
+      authSaveBtn.disabled = true;
+      authSaveBtn.innerHTML = `${ICONS.spinner} <span>Verifying...</span>`;
+      authError.style.display = 'none';
+
+      try {
+        const verified = await verifyCredentials(token, repoStr);
+        setCustomRepo(repoStr);
+        localStorage.setItem(CONFIG.storageAuthKey, JSON.stringify(verified));
+        updateAuthUI(verified);
+        authModal.style.display = 'none';
+      } catch (err) {
+        authError.textContent = err.message;
+        authError.style.display = 'block';
+      } finally {
+        authSaveBtn.disabled = false;
+        authSaveBtn.innerHTML = `<span>Verify &amp; Connect</span>`;
+      }
+    });
+
+    // Hotkeys
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === CONFIG.hotkeyConnect) {
+        e.preventDefault();
+        openAuthModal();
+      } else if (e.key.toLowerCase() === CONFIG.hotkeyComment && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        toggleInspectMode();
+      } else if (e.key === 'Escape') {
+        if (isInspectMode) stopInspectMode();
+        if (inlinePopover.style.display === 'flex') inlinePopover.style.display = 'none';
+        if (authModal.style.display === 'flex') authModal.style.display = 'none';
+      }
+    });
+
+    // Pins Persistence
+    function getPins() {
+      try {
+        return JSON.parse(localStorage.getItem(CONFIG.storagePinsKey) || '[]');
+      } catch {
+        return [];
+      }
+    }
+
+    function savePins(pins) {
+      localStorage.setItem(CONFIG.storagePinsKey, JSON.stringify(pins));
+    }
+
+    function loadPinsForPage() {
+      document.querySelectorAll('.al-pin').forEach(p => p.remove());
+      const all = getPins();
+      const page = getPageLocation();
+      const current = all.filter(p => p.page === page);
+
+      current.forEach((pinData, idx) => {
+        createPinBadge(pinData, idx + 1);
+      });
+    }
+
+    function createPinBadge(pinData, indexNum) {
+      const el = document.querySelector(pinData.selector);
+      let top = pinData.top;
+      let left = pinData.left;
+
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        top = rect.top + window.scrollY;
+        left = rect.left + window.scrollX;
+      }
+
+      const pin = document.createElement('div');
+      pin.className = 'al-pin' + (pinData.issueNumber ? ' has-issue' : '');
+      pin.style.top = `${top}px`;
+      pin.style.left = `${left}px`;
+      pin.innerHTML = pinData.issueNumber ? `#${pinData.issueNumber}` : `${indexNum}`;
+      pin.title = pinData.comment || 'Click to view directive';
+
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openExistingPin(pinData, pin);
+      });
+
+      document.body.appendChild(pin);
+      return pin;
+    }
+
+    function positionPopover(targetEl, pinEl) {
+      const rect = targetEl ? targetEl.getBoundingClientRect() : pinEl.getBoundingClientRect();
+      const popWidth = 380;
+      const popHeight = 220;
+
+      let left = rect.left + window.scrollX;
+      let top = rect.bottom + window.scrollY + 8;
+
+      if (rect.bottom + popHeight > window.innerHeight && rect.top - popHeight > 0) {
+        top = rect.top + window.scrollY - popHeight - 8;
+        inlinePopover.classList.add('arrow-bottom');
+      } else {
+        inlinePopover.classList.remove('arrow-bottom');
+      }
+
+      if (left + popWidth > window.innerWidth - 20) {
+        left = window.innerWidth - popWidth - 20;
+      }
+      if (left < 10) left = 10;
+
+      inlinePopover.style.top = `${top}px`;
+      inlinePopover.style.left = `${left}px`;
+      inlinePopover.style.display = 'flex';
+    }
+
+    function openExistingPin(pinData, pinEl) {
+      activePin = pinData;
+      popTag.textContent = `<${pinData.tagName || 'element'}>`;
+      popPage.textContent = pinData.page;
+
+      popViewMain.style.display = 'none';
+      popViewSuccess.style.display = 'none';
+      popViewExisting.style.display = 'flex';
+
+      existingBadge.textContent = pinData.issueNumber ? `Issue #${pinData.issueNumber}` : 'Draft Pin';
+      existingCat.textContent = pinData.category || 'UI Fix';
+      existingComment.textContent = pinData.comment || '(No description)';
+
+      const targetEl = document.querySelector(pinData.selector);
+      positionPopover(targetEl, pinEl);
+    }
+
+    deletePinBtn.addEventListener('click', () => {
+      if (!activePin) return;
+      let pins = getPins();
+      pins = pins.filter(p => p.id !== activePin.id);
+      savePins(pins);
+      loadPinsForPage();
+      inlinePopover.style.display = 'none';
+    });
+
+    existingCopyBtn.addEventListener('click', () => {
+      if (!activePin) return;
+      const markdown = buildAgentInstruction(activePin, activePin.comment);
+      navigator.clipboard.writeText(markdown).then(() => {
+        existingCopyBtn.innerHTML = `${ICONS.check}<span>Copied!</span>`;
+        setTimeout(() => {
+          existingCopyBtn.innerHTML = `${ICONS.clipboard}<span>Copy Task</span>`;
+        }, 1500);
+      });
+    });
+
+    // Inspect Mode Handlers
+    function toggleInspectMode() {
+      if (isInspectMode) stopInspectMode();
+      else startInspectMode();
+    }
+
+    function startInspectMode() {
+      isInspectMode = true;
+      targetBanner.style.display = 'flex';
+      document.body.style.cursor = 'crosshair';
+      inlinePopover.style.display = 'none';
+
+      window.addEventListener('mousemove', onMouseMove, true);
+      window.addEventListener('click', onElementClick, true);
+    }
+
+    function stopInspectMode() {
+      isInspectMode = false;
+      targetBanner.style.display = 'none';
+      inspectBox.style.display = 'none';
+      document.body.style.cursor = '';
+
+      window.removeEventListener('mousemove', onMouseMove, true);
+      window.removeEventListener('click', onElementClick, true);
+    }
+
+    function onMouseMove(e) {
+      if (!isInspectMode) return;
+      const rootEl = document.getElementById('al-root');
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (!el || (rootEl && rootEl.contains(el)) || el.classList.contains('al-pin')) {
+        inspectBox.style.display = 'none';
+        return;
+      }
+
+      hoveredElement = el;
+      const rect = el.getBoundingClientRect();
+      inspectBox.style.display = 'block';
+      inspectBox.style.top = `${rect.top}px`;
+      inspectBox.style.left = `${rect.left}px`;
+      inspectBox.style.width = `${rect.width}px`;
+      inspectBox.style.height = `${rect.height}px`;
+
+      const tag = el.tagName.toLowerCase();
+      const id = el.id ? `#${el.id}` : '';
+      const firstClass = el.classList.length ? `.${el.classList[0]}` : '';
+      inspectTooltip.textContent = `<${tag}${id || firstClass}>`;
+    }
+
+    function onElementClick(e) {
+      if (!isInspectMode) return;
+      const rootEl = document.getElementById('al-root');
+      if (rootEl && rootEl.contains(e.target)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (hoveredElement) {
+        const selected = hoveredElement;
+        stopInspectMode();
+
+        const rect = selected.getBoundingClientRect();
+        const selector = generateCssSelector(selected);
+        const outerHtml = getCleanOuterHtml(selected);
+        const innerText = (selected.innerText || '').trim().replace(/\s+/g, ' ').substring(0, 140);
+
+        activePin = {
+          id: 'pin_' + Date.now(),
+          page: getPageLocation(),
+          selector: selector,
+          outerHtml: outerHtml,
+          innerText: innerText,
+          tagName: selected.tagName.toLowerCase(),
+          top: rect.top + window.scrollY,
+          left: rect.left + window.scrollX,
+          comment: '',
+          category: activeCategory
+        };
+
+        popTag.textContent = `<${activePin.tagName}>`;
+        popPage.textContent = activePin.page;
+        popTextarea.value = '';
+
+        popViewMain.style.display = 'flex';
+        popViewSuccess.style.display = 'none';
+        popViewExisting.style.display = 'none';
+
+        positionPopover(selected, null);
+        popTextarea.focus();
+      }
+    }
+
+    function buildAgentInstruction(pinData, comment) {
+      return [
+        `### 🎯 UI Directive for Agent (Inline Element Pin)`,
+        `**Category**: \`${pinData.category || activeCategory}\` | **Page**: [\`${pinData.page}\`](file:///${pinData.page})`,
+        ``,
+        `#### 💬 User Instruction`,
+        `> ${comment}`,
+        ``,
+        `---`,
+        `#### 📍 Element Grounding (Zero Ambiguity)`,
+        `- **Target Page / File**: \`${pinData.page}\``,
+        `- **CSS Selector**: \`${pinData.selector}\``,
+        `- **Element Text**: \`${pinData.innerText || 'N/A'}\``,
+        `- **Coordinates**: x=${Math.round(pinData.left)}, y=${Math.round(pinData.top)}`,
+        ``,
+        `\`\`\`html`,
+        pinData.outerHtml,
+        `\`\`\``,
+        ``,
+        `> 🤖 **Agent Guidance**: Locate this element in \`${pinData.page}\` using the text, class, or selector above and apply the requested change cleanly.`
+      ].join('\n');
+    }
+
+    async function submitIssueInPage() {
+      if (!activePin) return;
+      const comment = popTextarea.value.trim();
+      if (!comment) {
+        alert('Please describe what needs to be changed.');
+        popTextarea.focus();
+        return;
+      }
+
+      const repo = getEffectiveRepo();
+      if (!repo || !repo.includes('/')) {
+        openAuthModal();
+        return;
+      }
+
+      if (!authUser || !authUser.token) {
+        openAuthModal();
+        return;
+      }
+
+      popSubmitBtn.disabled = true;
+      popSubmitLabel.innerHTML = `${ICONS.spinner} <span>Posting...</span>`;
+
+      activePin.category = activeCategory;
+      activePin.comment = comment;
+
+      const title = `[${activeCategory}] ${activePin.page}: <${activePin.tagName}> ${comment.substring(0, 50)}`;
+      const body = buildAgentInstruction(activePin, comment);
+      const labels = [...CONFIG.defaultLabels, activeCategory.toLowerCase().replace(/[^a-z0-9]/g, '-')];
+
+      try {
+        const [owner, name] = repo.split('/');
+        const res = await fetch(`https://api.github.com/repos/${owner}/${name}/issues`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${authUser.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ title, body, labels })
+        });
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.message || `GitHub API error (${res.status})`);
+        }
+
+        const issue = await res.json();
+        activePin.issueNumber = issue.number;
+        activePin.issueUrl = issue.html_url;
+
+        const pins = getPins();
+        pins.push(activePin);
+        savePins(pins);
+
+        createPinBadge(activePin, pins.length);
+
+        popViewMain.style.display = 'none';
+        popViewSuccess.style.display = 'flex';
+        successTitle.textContent = `Issue #${issue.number} Created!`;
+        successBody.innerHTML = `<strong>${title}</strong><p style="margin-top:4px; margin-bottom:0;">"${comment}"</p>`;
+      } catch (err) {
+        alert(`Could not create issue: ${err.message}`);
+      } finally {
+        popSubmitBtn.disabled = false;
+        popSubmitLabel.textContent = 'Create Issue';
+      }
+    }
+
+    popCopyBtn.addEventListener('click', () => {
+      if (!activePin) return;
+      const comment = popTextarea.value.trim();
+      if (!comment) {
+        alert('Please enter a comment.');
+        popTextarea.focus();
+        return;
+      }
+      const markdown = buildAgentInstruction(activePin, comment);
+      navigator.clipboard.writeText(markdown).then(() => {
+        popCopyBtn.innerHTML = `${ICONS.check}<span>Copied!</span>`;
+        setTimeout(() => {
+          popCopyBtn.innerHTML = `${ICONS.clipboard}<span>Copy for Agent</span>`;
+        }, 1500);
+      });
+    });
+
+    successDoneBtn.addEventListener('click', () => {
+      inlinePopover.style.display = 'none';
+    });
+
+    dockPinBtn.addEventListener('click', toggleInspectMode);
+    cancelTargetBtn.addEventListener('click', stopInspectMode);
+    popCloseBtn.addEventListener('click', () => { inlinePopover.style.display = 'none'; });
+    popSubmitBtn.addEventListener('click', submitIssueInPage);
+
+    loadPinsForPage();
+  }
+
+  function init(customConfig) {
+    if (isInitialized) return;
+    isInitialized = true;
+
+    // Merge configurations in order: DEFAULT -> script dataset -> global window.AgentLensConfig -> passed options
+    const scriptConfig = parseScriptTagConfig();
+    const globalConfig = typeof window !== 'undefined' ? (window.AgentLensConfig || {}) : {};
+
+    CONFIG = {
+      ...DEFAULT_CONFIG,
+      ...scriptConfig,
+      ...globalConfig,
+      ...(customConfig || {})
+    };
+
+    if (CONFIG.repo && (!CONFIG.repoOwner || !CONFIG.repoName)) {
+      const parts = CONFIG.repo.split('/');
+      if (parts.length === 2) {
+        CONFIG.repoOwner = parts[0];
+        CONFIG.repoName = parts[1];
+      }
+    }
+
+    injectStyles();
+    injectDOM();
+    setupEvents();
+  }
+
+  // Auto-initialize in browser environments
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => init());
+    } else {
+      init();
+    }
+  }
+
+  return {
+    init: init,
+    openAuth: () => {
+      const modal = document.getElementById('al-auth-modal');
+      if (modal) modal.style.display = 'flex';
+    },
+    getPins: () => {
+      try {
+        return JSON.parse(localStorage.getItem(CONFIG.storagePinsKey) || '[]');
+      } catch {
+        return [];
+      }
+    },
+    clearPins: () => {
+      localStorage.removeItem(CONFIG.storagePinsKey);
+      document.querySelectorAll('.al-pin').forEach(p => p.remove());
+    }
+  };
+}));

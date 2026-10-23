@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentLens • Interactive Demo & Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #030712;
+      --card-bg: #0b1329;
+      --card-border: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --accent: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    header {
+      border-bottom: 1px solid var(--card-border);
+      background: rgba(11, 19, 41, 0.8);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .badge-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 48px 24px 100px;
+    }
+
+    .hero {
+      text-align: center;
+      max-width: 800px;
+      margin: 0 auto 60px;
+    }
+
+    .hero h1 {
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 18px;
+      background: linear-gradient(180deg, #ffffff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+    }
+
+    .demo-instructions {
+      background: linear-gradient(180deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.5) 100%);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 20px 24px;
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+
+    .key-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: #38bdf8;
+      box-shadow: 0 2px 0 #334155;
+    }
+
+    .grid-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 28px;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: #3b82f6;
+    }
+
+    .card-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 18px;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+    }
+
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: #ffffff;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+    }
+
+    .demo-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #ffffff;
+      transition: all 0.15s ease;
+    }
+
+    .demo-btn:hover {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+
+    .code-preview {
+      background: #090d16;
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-top: 36px;
+    }
+
+    .code-preview h4 {
+      font-size: 14px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+
+    pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #cbd5e1;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <div class="brand-logo">⚡</div>
+        <div>
+          <strong style="font-size: 16px;">AgentLens</strong>
+          <span class="badge-pill" style="margin-left: 8px;">Interactive Demo</span>
+        </div>
+      </a>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <span style="font-size: 13px; color: var(--text-muted);">Try pressing <span class="key-badge">C</span></span>
+        <a href="https://github.com" class="demo-btn" target="_blank" rel="noopener noreferrer">GitHub Repo</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="badge-pill" style="margin-bottom: 16px; display: inline-block;">Visual UI Feedback for AI Coding Agents</div>
+      <h1>Direct Your AI Coding Agent With Pixel-Perfect Precision</h1>
+      <p>
+        Click any element on this page to pin a comment. AgentLens extracts CSS selectors, DOM hierarchies, and text, then turns visual directives into instant GitHub Issues or clipboard prompts for Claude, Cursor, Antigravity, and Copilot.
+      </p>
+
+      <div class="demo-instructions">
+        <span>👇</span>
+        <span>
+          Press <span class="key-badge">C</span> or click the <strong>Inline Comment</strong> button docked in the bottom-right corner to test!
+        </span>
+      </div>
+    </section>
+
+    <section class="grid-cards">
+      <article class="feature-card" id="card-pinpoint">
+        <div class="card-icon">🎯</div>
+        <h3>Zero-Ambiguity Grounding</h3>
+        <p>
+          No more describing "the third button under the second subheader". AgentLens automatically passes exact CSS selectors, tags, and DOM snippets directly into the agent's context.
+        </p>
+        <button class="demo-btn" onclick="alert('Try pinning a comment to this button using AgentLens!')">Test Target Element</button>
+      </article>
+
+      <article class="feature-card" id="card-github-sync">
+        <div class="card-icon">⚡</div>
+        <h3>Direct GitHub Issue Sync</h3>
+        <p>
+          Connect a GitHub Personal Access Token once. Team members or clients can file issues directly from the live staging site without ever navigating to github.com.
+        </p>
+        <button class="demo-btn" onclick="window.AgentLens.openAuth()">Connect GitHub PAT</button>
+      </article>
+
+      <article class="feature-card" id="card-ai-agent-ready">
+        <div class="card-icon">🤖</div>
+        <h3>1-Click Agent Prompts</h3>
+        <p>
+          Don't have GitHub write access? Click "Copy for Agent" to paste an impeccably structured markdown task prompt directly into Cursor, Claude Code, or Antigravity.
+        </p>
+        <button class="demo-btn" onclick="alert('Click Inline Comment (C) to copy a structured prompt!')">Copy Sample Prompt</button>
+      </article>
+    </section>
+
+    <section class="code-preview">
+      <h4>Drop into any web app with 1 script tag</h4>
+      <pre><code>&lt;!-- Include AgentLens in your HTML &lt;head&gt; or &lt;body&gt; --&gt;
+&lt;script src="https://cdn.jsdelivr.net/gh/fredhersch/agent-lens@main/dist/agent-lens.min.js"
+        data-repo="my-org/my-app"
+        data-position="bottom-right"
+        defer&gt;&lt;/script&gt;</code></pre>
+    </section>
+  </main>
+
+  <!-- Embed AgentLens Standalone Script -->
+  <script src="../dist/agent-lens.js"
+          data-repo="fredhersch/ohs-edge-evals"
+          data-position="bottom-right"
+          defer></script>
+
+</body>
+</html>

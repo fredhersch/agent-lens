@@ -1,0 +1,8 @@
+# AgentLens Rules for Cursor
+
+When asked to "review AgentLens issues" or "fix UI feedback":
+1. Run `python3 cli/fetch_issues.py --repo <owner/repo>` to fetch the latest UI directives.
+2. Group tasks by file to minimize file re-reads and context switching.
+3. Locate elements using the reported `CSS Selector` or `Element Text`.
+4. Apply minimal, clean modifications matching existing design tokens and framework patterns.
+5. In your commit message or PR description, reference `fixes #<issue_number>` to automatically close the resolved issue on GitHub.
